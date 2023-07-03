@@ -34,3 +34,4 @@ def get_and_save_image_to_disk(image_url, filepath_template, params=None):
         return
     with open(filepath, 'wb') as file:
         file.write(image)
+    return filepath
