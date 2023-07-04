@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 
 from utils import get_and_save_image_to_disk
 
-
 API_VERSION = 5.131
 MAX_NUM_COMICS = 2796
 
