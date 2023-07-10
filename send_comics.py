@@ -1,6 +1,5 @@
 import os
 import shutil
-from pathlib import Path
 from random import randint
 
 import requests
@@ -29,14 +28,13 @@ def download_comic(comic_json_url, images_directory):
     return get_and_save_image_to_disk(img_url, filepath_template), comic_comment
 
 
-def get_upload_url():
-    group_id = int(os.getenv('GROUP_ID'))
-    vk_token = os.getenv('VK_TOKEN')
+def get_upload_url(vk_token, group_id):
     params = {'group_id': group_id, 'access_token': vk_token, 'v': 5.131}
     response = requests.get('https://api.vk.com/method/photos.getWallUploadServer', params=params)
     answer = response.json()
     check_vk_response(answer)
-    return answer
+    upload_url = answer.get('response', {}).get('upload_url')
+    return upload_url
 
 
 def upload_photo_to_server(imagepath, url):
@@ -48,10 +46,7 @@ def upload_photo_to_server(imagepath, url):
     return answer
 
 
-def save_to_group(server, photo, hash_, caption):
-    user_id = int(os.getenv('USER_ID'))
-    group_id = int(os.getenv('GROUP_ID'))
-    vk_token = os.getenv('VK_TOKEN')
+def save_to_group(vk_token, user_id, group_id, server, photo, hash_, caption):
     params = {'photo': photo, 'server': server, 'hash': hash_, 'user_id': user_id, 'v': API_VERSION,
               'caption': caption, 'group_id': group_id, 'access_token': vk_token}
     response = requests.post('https://api.vk.com/method/photos.saveWallPhoto', params=params)
@@ -62,10 +57,9 @@ def save_to_group(server, photo, hash_, caption):
     return answer
 
 
-def post_photo_in_group(attachments):
-    group_id = int(os.getenv('GROUP_ID'))
-    vk_token = os.getenv('VK_TOKEN')
-    params = {'attachments': attachments, 'owner_id': -group_id, 'v': API_VERSION,
+def post_photo_in_group(vk_token, group_id, attachments):
+    owner_id = '-' + group_id
+    params = {'attachments': attachments, 'owner_id': owner_id, 'v': API_VERSION,
               'access_token': vk_token}
     response = requests.post('https://api.vk.com/method/wall.post', params=params)
     response.raise_for_status()
@@ -76,26 +70,29 @@ def post_photo_in_group(attachments):
 
 def main():
     load_dotenv()
+    vk_token = os.getenv('VK_TOKEN')
+    group_id = os.getenv('GROUP_ID')
+    user_id = os.getenv('USER_ID')
+
     num_comic = randint(1, MAX_NUM_COMICS)
     comic_url = f'https://xkcd.com/{num_comic}/info.0.json'
     
     images_directory = os.getenv('IMAGES_DIRECTORY', 'images/')
-    Path(images_directory).mkdir(parents=True, exist_ok=True)
 
     try:
         imagepath, caption = download_comic(comic_url, images_directory)
     except req_exc.ConnectionError as e:
-        print('Connection error при загрузке комикса:', e)
+        print('Connection error при загрузке комикса c xkcd.com:', e)
         return
     except req_exc.Timeout as e:
-        print('Timeout error при загрузке комикса:', e)
+        print('Timeout error при загрузке комикса с xkcd.com:', e)
         return
     except req_exc.HTTPError as e:
-        print('Http error при загрузке комикса:', e)
+        print('Http error при загрузке комикса с xkcd.com:', e)
         return
 
     try:
-        vk_answer = get_upload_url()
+        vk_upload_url = get_upload_url(vk_token, group_id)
     except req_exc.ConnectionError as e:
         print('Connection error при получении ссылки загрузки ВК:', e)
         return
@@ -105,8 +102,6 @@ def main():
     except req_exc.HTTPError as e:
         print('Http error при получении ссылки загрузки ВК:', e)
         return
-
-    vk_upload_url = vk_answer.get('response', {}).get('upload_url')
 
     try:
         answer = upload_photo_to_server(imagepath, vk_upload_url)
@@ -127,7 +122,7 @@ def main():
         print('Комикс не был загружен в ВК! Ошибка загрузки!')
         return
     try:
-        answer = save_to_group(server, photo, hash_, caption)  
+        answer = save_to_group(vk_token, user_id, group_id, server, photo, hash_, caption)  
     except req_exc.ConnectionError as e:
         print('Connection error при сохранении комикса в группе ВК:', e)
         return
@@ -146,7 +141,7 @@ def main():
     attachments = f'photo{owner_id}_{photo_id}'
 
     try:
-        answer = post_photo_in_group(attachments)
+        answer = post_photo_in_group(vk_token, group_id, attachments)
     except req_exc.ConnectionError as e:
         print('Connection error при публикации комикса в группе ВК:', e)
         return

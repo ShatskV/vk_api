@@ -4,8 +4,6 @@ from urllib.parse import unquote_plus, urlsplit
 
 import requests
 
-# from settings import logger
-
 
 def rm_file(filepath):
     if os.path.isfile(filepath):
@@ -29,7 +27,6 @@ def get_and_save_image_to_disk(image_url, filepath_template, params=None):
     image = response.content
     filepath = make_filepath(image_url, filepath_template)    
     if not filepath:
-        # logger.error(f'url: {image_url} This is not image url')
         print(f'url: {image_url} This is not image url')
         return
     with open(filepath, 'wb') as file:
