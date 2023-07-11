@@ -6,7 +6,7 @@ import requests
 import requests.exceptions as req_exc
 from dotenv import load_dotenv
 
-from utils import get_and_save_image_to_disk
+from utils import make_filepath, get_image_from_url, save_image_to_disk
 
 API_VERSION = 5.131
 MAX_NUM_COMICS = 2796
@@ -18,14 +18,15 @@ def check_vk_response(answer):
         raise req_exc.HTTPError(error)
 
 
-def download_comic(comic_json_url, images_directory):
+def get_comic_data(comic_json_url, images_directory):
     filename = 'comic'
     response = requests.get(comic_json_url)
+    response.raise_for_status()
     comic_data = response.json()
     filepath_template = os.path.join(images_directory, filename)
     img_url = comic_data.get('img')
     comic_comment = comic_data.get('alt')
-    return get_and_save_image_to_disk(img_url, filepath_template), comic_comment
+    return img_url, filepath_template, comic_comment
 
 
 def get_upload_url(vk_token, group_id):
@@ -54,7 +55,9 @@ def save_to_group(vk_token, user_id, group_id, server, photo, hash_, caption):
     answer = response.json()
     check_vk_response(answer)
     answer = answer.get('response', [])[0]
-    return answer
+    photo_id = answer.get('id')
+    owner_id = answer.get('owner_id')
+    return photo_id, owner_id
 
 
 def post_photo_in_group(vk_token, group_id, attachments):
@@ -73,14 +76,15 @@ def main():
     vk_token = os.getenv('VK_TOKEN')
     group_id = os.getenv('GROUP_ID')
     user_id = os.getenv('USER_ID')
-
+    
     num_comic = randint(1, MAX_NUM_COMICS)
     comic_url = f'https://xkcd.com/{num_comic}/info.0.json'
     
     images_directory = os.getenv('IMAGES_DIRECTORY', 'images/')
 
     try:
-        imagepath, caption = download_comic(comic_url, images_directory)
+        img_url, filepath_template, caption = get_comic_data(comic_url, images_directory)
+        image = get_image_from_url(img_url)
     except req_exc.ConnectionError as e:
         print('Connection error при загрузке комикса c xkcd.com:', e)
         return
@@ -90,69 +94,41 @@ def main():
     except req_exc.HTTPError as e:
         print('Http error при загрузке комикса с xkcd.com:', e)
         return
+    
+    imagepath = make_filepath(img_url, filepath_template)
+    if not imagepath:
+        print(f'url: {img_url} This is not image url')
+        return
+    
+    save_image_to_disk(image, imagepath)    
 
     try:
         vk_upload_url = get_upload_url(vk_token, group_id)
-    except req_exc.ConnectionError as e:
-        print('Connection error при получении ссылки загрузки ВК:', e)
-        return
-    except req_exc.Timeout as e:
-        print('Timeout error при получении ссылки загрузки ВК:', e)
-        return
-    except req_exc.HTTPError as e:
-        print('Http error при получении ссылки загрузки ВК:', e)
-        return
-
-    try:
         answer = upload_photo_to_server(imagepath, vk_upload_url)
+        server = answer.get('server')
+        photo = answer.get('photo')
+        hash_ = answer.get('hash')
+        if not photo:
+            print('Комикс не был загружен в ВК! Ошибка загрузки!')
+            return
+        photo_id, owner_id = save_to_group(vk_token, user_id, group_id, server, photo, hash_, caption)
+        attachments = f'photo{owner_id}_{photo_id}'
+        post_photo_in_group(vk_token, group_id, attachments)
     except req_exc.ConnectionError as e:
-        print('Connection error при загрузке комикса в ВК:', e)
+        print('Connection error при публикации в группе ВК скачанного комикса :', e)
         return
     except req_exc.Timeout as e:
-        print('Timeout error при загрузке комикса в ВК:', e)
+        print('Timeout error при публикации в группе ВК скачанного комикса :', e)
         return
     except req_exc.HTTPError as e:
-        print('Http error при загрузке комикса в ВК:', e)
-        return
-
-    server = answer.get('server')
-    photo = answer.get('photo')
-    hash_ = answer.get('hash')
-    if not photo:
-        print('Комикс не был загружен в ВК! Ошибка загрузки!')
-        return
-    try:
-        answer = save_to_group(vk_token, user_id, group_id, server, photo, hash_, caption)  
-    except req_exc.ConnectionError as e:
-        print('Connection error при сохранении комикса в группе ВК:', e)
-        return
-    except req_exc.Timeout as e:
-        print('Timeout error при сохранении комикса в группе ВК:', e)
-        return
-    except req_exc.HTTPError as e:
-        print('Http error при сохранении комикса в группе ВК:', e)
-        return
-    except IndexError:
-        print('Не удалось сохранить комикс в группе ВК! Ошибка сохранения!')
+        print('Http error при публикации в группе ВК скачанного комикса :', e)
         return
     
-    photo_id = answer.get('id')
-    owner_id = answer.get('owner_id')
-    attachments = f'photo{owner_id}_{photo_id}'
-
-    try:
-        answer = post_photo_in_group(vk_token, group_id, attachments)
-    except req_exc.ConnectionError as e:
-        print('Connection error при публикации комикса в группе ВК:', e)
-        return
-    except req_exc.Timeout as e:
-        print('Timeout error при публикации комикса в группе ВК:', e)
-        return
-    except req_exc.HTTPError as e:
-        print('Http error при публикации комикса в группе ВК:', e)
-        return
-    shutil.rmtree(images_directory)
-    print('Комикс был успешно загружен в группу ВК!')
+    else:
+        print('Комикс был успешно загружен в группу ВК!')
+    finally:
+        shutil.rmtree(images_directory, ignore_errors=True)
+        
 
 if __name__ == '__main__':
     main()

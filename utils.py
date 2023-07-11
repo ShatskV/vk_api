@@ -5,11 +5,6 @@ from urllib.parse import unquote_plus, urlsplit
 import requests
 
 
-def rm_file(filepath):
-    if os.path.isfile(filepath):
-        os.remove(filepath)
-
-
 def make_filepath(url, filepath_template):
     clear_url = unquote_plus(url)
     url_parts = urlsplit(clear_url)
@@ -19,16 +14,15 @@ def make_filepath(url, filepath_template):
     return f'{filepath_template}{ext}'
         
 
-def get_and_save_image_to_disk(image_url, filepath_template, params=None):
-    directory = Path(filepath_template).parent
-    Path(directory).mkdir(parents=True, exist_ok=True)
+def get_image_from_url(image_url, params=None):
     response = requests.get(image_url, params=params)
     response.raise_for_status()
     image = response.content
-    filepath = make_filepath(image_url, filepath_template)    
-    if not filepath:
-        print(f'url: {image_url} This is not image url')
-        return
+    return image
+
+
+def save_image_to_disk(image, filepath):
+    directory = Path(filepath).parent
+    Path(directory).mkdir(parents=True, exist_ok=True)
     with open(filepath, 'wb') as file:
         file.write(image)
-    return filepath
