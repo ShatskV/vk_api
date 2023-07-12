@@ -1,12 +1,13 @@
 import os
 import shutil
+from pathlib import Path
 from random import randint
 
 import requests
 import requests.exceptions as req_exc
 from dotenv import load_dotenv
 
-from utils import make_filepath, get_image_from_url, save_image_to_disk
+from utils import make_filepath
 
 API_VERSION = 5.131
 MAX_NUM_COMICS = 2796
@@ -18,7 +19,7 @@ def check_vk_response(answer):
         raise req_exc.HTTPError(error)
 
 
-def get_comic_data(comic_json_url, images_directory):
+def get_random_comic(comic_json_url, images_directory):
     filename = 'comic'
     response = requests.get(comic_json_url)
     response.raise_for_status()
@@ -26,8 +27,17 @@ def get_comic_data(comic_json_url, images_directory):
     filepath_template = os.path.join(images_directory, filename)
     img_url = comic_data.get('img')
     comic_comment = comic_data.get('alt')
-    return img_url, filepath_template, comic_comment
-
+    response = requests.get(img_url)
+    response.raise_for_status()
+    image = response.content
+    imagepath = make_filepath(img_url, filepath_template)
+    if imagepath:
+        directory = Path(imagepath).parent
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        with open(imagepath, 'wb') as file:
+            file.write(image)
+    return imagepath, comic_comment
+    
 
 def get_upload_url(vk_token, group_id):
     params = {'group_id': group_id, 'access_token': vk_token, 'v': 5.131}
@@ -61,7 +71,7 @@ def save_to_group(vk_token, user_id, group_id, server, photo, hash_, caption):
 
 
 def post_photo_in_group(vk_token, group_id, attachments):
-    owner_id = '-' + group_id
+    owner_id = f'-{group_id}'
     params = {'attachments': attachments, 'owner_id': owner_id, 'v': API_VERSION,
               'access_token': vk_token}
     response = requests.post('https://api.vk.com/method/wall.post', params=params)
@@ -80,11 +90,10 @@ def main():
     num_comic = randint(1, MAX_NUM_COMICS)
     comic_url = f'https://xkcd.com/{num_comic}/info.0.json'
     
-    images_directory = os.getenv('IMAGES_DIRECTORY', 'images/')
+    images_directory = os.getenv('IMAGES_DIRECTORY', 'images')
 
     try:
-        img_url, filepath_template, caption = get_comic_data(comic_url, images_directory)
-        image = get_image_from_url(img_url)
+        imagepath, caption = get_random_comic(comic_url, images_directory)
     except req_exc.ConnectionError as e:
         print('Connection error при загрузке комикса c xkcd.com:', e)
         return
@@ -95,12 +104,9 @@ def main():
         print('Http error при загрузке комикса с xkcd.com:', e)
         return
     
-    imagepath = make_filepath(img_url, filepath_template)
     if not imagepath:
-        print(f'url: {img_url} This is not image url')
+        print(f'url: {comic_url} - This is not contain image url')
         return
-    
-    save_image_to_disk(image, imagepath)    
 
     try:
         vk_upload_url = get_upload_url(vk_token, group_id)
@@ -108,9 +114,6 @@ def main():
         server = answer.get('server')
         photo = answer.get('photo')
         hash_ = answer.get('hash')
-        if not photo:
-            print('Комикс не был загружен в ВК! Ошибка загрузки!')
-            return
         photo_id, owner_id = save_to_group(vk_token, user_id, group_id, server, photo, hash_, caption)
         attachments = f'photo{owner_id}_{photo_id}'
         post_photo_in_group(vk_token, group_id, attachments)
